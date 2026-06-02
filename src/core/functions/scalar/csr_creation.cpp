@@ -1,4 +1,5 @@
-#include "duckdb/common/vector_operations/quaternary_executor.hpp"
+#include "duckdb/common/vector_operations/binary_executor.hpp"
+#include "duckdb/common/vector_operations/ternary_executor.hpp"
 #include "duckdb/main/client_data.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckpgq/common.hpp"
@@ -10,6 +11,37 @@
 #include <mutex>
 
 namespace duckdb {
+
+template <class A_TYPE, class B_TYPE, class C_TYPE, class D_TYPE, class RESULT_TYPE, class FUN>
+static void ExecuteQuaternary(Vector &a, Vector &b, Vector &c, Vector &d, Vector &result, idx_t count, FUN fun) {
+	result.SetVectorType(VectorType::FLAT_VECTOR);
+
+	UnifiedVectorFormat adata, bdata, cdata, ddata;
+	a.ToUnifiedFormat(count, adata);
+	b.ToUnifiedFormat(count, bdata);
+	c.ToUnifiedFormat(count, cdata);
+	d.ToUnifiedFormat(count, ddata);
+
+	auto a_ptr = UnifiedVectorFormat::GetData<A_TYPE>(adata);
+	auto b_ptr = UnifiedVectorFormat::GetData<B_TYPE>(bdata);
+	auto c_ptr = UnifiedVectorFormat::GetData<C_TYPE>(cdata);
+	auto d_ptr = UnifiedVectorFormat::GetData<D_TYPE>(ddata);
+	auto result_data = FlatVector::GetData<RESULT_TYPE>(result);
+	auto &result_validity = FlatVector::Validity(result);
+
+	for (idx_t i = 0; i < count; i++) {
+		auto aidx = adata.sel->get_index(i);
+		auto bidx = bdata.sel->get_index(i);
+		auto cidx = cdata.sel->get_index(i);
+		auto didx = ddata.sel->get_index(i);
+		if (adata.validity.RowIsValid(aidx) && bdata.validity.RowIsValid(bidx) && cdata.validity.RowIsValid(cidx) &&
+		    ddata.validity.RowIsValid(didx)) {
+			result_data[i] = fun(a_ptr[aidx], b_ptr[bidx], c_ptr[cidx], d_ptr[didx]);
+		} else {
+			result_validity.SetInvalid(i);
+		}
+	}
+}
 
 static void CsrInitializeVertex(DuckPGQState &context, int32_t id, int64_t v_size) {
 	lock_guard<mutex> csr_init_lock(context.csr_lock);
@@ -144,7 +176,7 @@ static void CreateCsrEdgeFunction(DataChunk &args, ExpressionState &state, Vecto
 		CsrInitializeWeight(*duckpgq_state, info.id, edge_size, weight_type);
 	}
 	if (weight_type == PhysicalType::INT64) {
-		QuaternaryExecutor::Execute<int64_t, int64_t, int64_t, int64_t, int32_t>(
+		ExecuteQuaternary<int64_t, int64_t, int64_t, int64_t, int32_t>(
 		    args.data[4], args.data[5], args.data[6], args.data[7], result, args.size(),
 		    [&](int64_t src, int64_t dst, int64_t edge_id, int64_t weight) {
 			    auto pos = ++csr_entry->second->v[src + 1];
@@ -156,7 +188,7 @@ static void CreateCsrEdgeFunction(DataChunk &args, ExpressionState &state, Vecto
 		return;
 	}
 
-	QuaternaryExecutor::Execute<int64_t, int64_t, int64_t, double_t, int32_t>(
+	ExecuteQuaternary<int64_t, int64_t, int64_t, double_t, int32_t>(
 	    args.data[4], args.data[5], args.data[6], args.data[7], result, args.size(),
 	    [&](int64_t src, int64_t dst, int64_t edge_id, double_t weight) {
 		    auto pos = ++csr_entry->second->v[src + 1];

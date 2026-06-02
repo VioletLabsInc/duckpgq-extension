@@ -7,6 +7,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: true
@@ -24,15 +30,66 @@ jobs:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5-variegata
     with:
-      duckdb_version: v1.5-variegata
+      duckdb_version: v1.5.3
       ci_tools_version: v1.5-variegata
       extension_name: duckpgq
+      override_duckdb_repository: VioletLabsInc/duckdb-pgq
 
   code-quality-check:
     name: Code Quality Check
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v1.5-variegata
     with:
-      duckdb_version: v1.5-variegata
+      duckdb_version: v1.5.3
       ci_tools_version: v1.5-variegata
       extension_name: duckpgq
+      override_duckdb_repository: VioletLabsInc/duckdb-pgq
       format_checks: 'format;tidy'
+
+  publish-extension-repository:
+    name: Publish extension repository (GitHub Pages)
+    needs: duckdb-stable-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: duckpgq-v1.5.3-extension-*
+          path: artifacts
+          merge-multiple: false
+
+      - name: Build static repository layout
+        run: |
+          set -euo pipefail
+          mkdir -p repo/v1.5.3
+          for artifact_dir in artifacts/*/; do
+            name="$(basename "$artifact_dir")"
+            arch="${name##*-extension-}"
+            case "$arch" in
+              linux_arm64|linux_amd64|osx_arm64|osx_amd64|windows_amd64|windows_arm64)
+                ext="$(find "$artifact_dir" -name 'duckpgq.duckdb_extension' | head -1)"
+                if [ -n "$ext" ]; then
+                  mkdir -p "repo/v1.5.3/$arch"
+                  gzip -c "$ext" > "repo/v1.5.3/$arch/duckpgq.duckdb_extension.gz"
+                  echo "Published v1.5.3/$arch/duckpgq.duckdb_extension.gz"
+                fi
+                ;;
+            esac
+          done
+          find repo -type f
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
