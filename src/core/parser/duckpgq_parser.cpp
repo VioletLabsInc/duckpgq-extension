@@ -35,16 +35,41 @@ namespace duckdb {
 
 static bool StatementContainsPGQ(SQLStatement *statement);
 
+MatchExpression *GetDuckPGQMatchExpression(TableFunctionRef &ref) {
+	auto *function = dynamic_cast<FunctionExpression *>(ref.function.get());
+	if (!function || function->function_name != "duckpgq_match") {
+		return nullptr;
+	}
+	if (!function->children.empty()) {
+		if (auto *match_expr = dynamic_cast<MatchExpression *>(function->children[0].get())) {
+			return match_expr;
+		}
+		return nullptr;
+	}
+	if (ref.match_expression) {
+		return ref.match_expression.get();
+	}
+	return nullptr;
+}
+
+static bool TableFunctionRefContainsPGQ(TableFunctionRef &table_function_ref) {
+	auto *function = dynamic_cast<FunctionExpression *>(table_function_ref.function.get());
+	if (!function || function->function_name != "duckpgq_match") {
+		return false;
+	}
+	if (!function->children.empty()) {
+		return dynamic_cast<MatchExpression *>(function->children[0].get()) != nullptr ||
+		       function->children[0]->GetExpressionType() == ExpressionType::VALUE_CONSTANT;
+	}
+	return table_function_ref.match_expression != nullptr;
+}
+
 static bool TableRefContainsPGQ(TableRef *table_ref) {
 	if (!table_ref) {
 		return false;
 	}
 	if (auto table_function_ref = dynamic_cast<TableFunctionRef *>(table_ref)) {
-		if (table_function_ref->match_expression) {
-			return true;
-		}
-		auto function = dynamic_cast<FunctionExpression *>(table_function_ref->function.get());
-		return function && function->function_name == "duckpgq_match";
+		return TableFunctionRefContainsPGQ(*table_function_ref);
 	}
 	if (auto join_ref = dynamic_cast<JoinRef *>(table_ref)) {
 		return TableRefContainsPGQ(join_ref->left.get()) || TableRefContainsPGQ(join_ref->right.get());
@@ -252,10 +277,11 @@ void duckpgq_find_match_function(TableRef *table_ref, DuckPGQState &duckpgq_stat
 		if (!function || function->function_name != "duckpgq_match") {
 			return;
 		}
-		MatchExpression *match_expr = table_function_ref->match_expression.get();
-		if (!match_expr && !function->children.empty()) {
-			match_expr = dynamic_cast<MatchExpression *>(function->children[0].get());
+		if (function->children.size() == 1 &&
+		    function->children[0]->GetExpressionType() == ExpressionType::VALUE_CONSTANT) {
+			return;
 		}
+		auto *match_expr = GetDuckPGQMatchExpression(*table_function_ref);
 		if (!match_expr) {
 			throw BinderException("duckpgq_match is missing a MATCH expression");
 		}
@@ -263,11 +289,13 @@ void duckpgq_find_match_function(TableRef *table_ref, DuckPGQState &duckpgq_stat
 			table_function_ref->alias = match_expr->alias;
 		}
 		int32_t match_index = duckpgq_state.match_index++;
-		if (table_function_ref->match_expression) {
+		if (!function->children.empty() && dynamic_cast<MatchExpression *>(function->children[0].get())) {
+			duckpgq_state.transform_expression[match_index] = std::move(function->children[0]);
+		} else if (table_function_ref->match_expression) {
 			duckpgq_state.transform_expression[match_index] =
 			    unique_ptr_cast<MatchExpression, ParsedExpression>(std::move(table_function_ref->match_expression));
 		} else {
-			duckpgq_state.transform_expression[match_index] = std::move(function->children[0]);
+			throw BinderException("duckpgq_match is missing a MATCH expression");
 		}
 		function->children.clear();
 		auto function_identifier = make_uniq<ConstantExpression>(Value::CreateValue(match_index));

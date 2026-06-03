@@ -33,6 +33,10 @@ ParserExtensionPlanResult duckpgq_handle_statement(SQLStatement *statement, Duck
 
 void duckpgq_find_match_function(TableRef *table_ref, DuckPGQState &duckpgq_state);
 
+//! Resolve a MATCH expression from a duckpgq_match table ref. Stock libduckdb stores the match
+//! in function children; fork DuckDB stores it on TableFunctionRef::match_expression.
+MatchExpression *GetDuckPGQMatchExpression(TableFunctionRef &ref);
+
 bool duckpgq_statement_contains_pgq(SQLStatement *statement);
 
 void duckpgq_transform_match_expressions(SQLStatement *statement, DuckPGQState &duckpgq_state);

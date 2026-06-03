@@ -29,6 +29,7 @@
 #include <duckdb/parser/tableref/matchref.hpp>
 #include <duckdb/parser/tableref/table_function_ref.hpp>
 #include <duckpgq/core/functions/table.hpp>
+#include <duckpgq/core/parser/duckpgq_parser.hpp>
 #include <duckpgq/core/utils/duckpgq_utils.hpp>
 
 namespace duckdb {
@@ -1018,20 +1019,16 @@ unique_ptr<TableRef> PGQMatchFunction::MatchBindReplace(ClientContext &context, 
 	auto duckpgq_state = GetDuckPGQState(context);
 
 	MatchExpression *ref = nullptr;
-	if (bind_input.ref.match_expression) {
-		ref = bind_input.ref.match_expression.get();
-	} else if (!bind_input.inputs.empty()) {
+	if (!bind_input.inputs.empty()) {
 		auto match_index = bind_input.inputs[0].GetValue<int32_t>();
 		auto lookup = duckpgq_state->transform_expression.find(match_index);
 		if (lookup == duckpgq_state->transform_expression.end() || !lookup->second) {
 			throw BinderException("Failed to resolve MATCH expression index %d for duckpgq_match", match_index);
 		}
 		ref = dynamic_cast<MatchExpression *>(lookup->second.get());
-	} else if (bind_input.ref.function) {
-		auto *func_expr = dynamic_cast<FunctionExpression *>(bind_input.ref.function.get());
-		if (func_expr && !func_expr->children.empty()) {
-			ref = dynamic_cast<MatchExpression *>(func_expr->children[0].get());
-		}
+	}
+	if (!ref) {
+		ref = GetDuckPGQMatchExpression(bind_input.ref);
 	}
 	if (!ref) {
 		throw BinderException("Failed to resolve MATCH expression for duckpgq_match");
