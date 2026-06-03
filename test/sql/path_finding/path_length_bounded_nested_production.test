@@ -1,5 +1,5 @@
-# name: test/sql/path_finding/path_length_native_syntax.test
-# description: native GRAPH_TABLE syntax without parser-extension minus prefix
+# name: test/sql/path_finding/path_length_bounded_nested_production.test
+# description: production related_entities query shape without leading dash prefix
 # group: [path_finding]
 
 require duckpgq
@@ -22,9 +22,25 @@ EDGE TABLES (
                 DESTINATION KEY (dst) REFERENCES Student (id)
     );
 
-statement ok
-FROM GRAPH_TABLE(pg
-    MATCH p = (a:Student WHERE a.id = 0)-[e:know]-{1,3}(b:Student WHERE b.id > 0)
-    COLUMNS (a.id as a_id, b.id as b_id, path_length(p) AS hop_distance)
-    ) study
-    ORDER BY a_id, b_id, hop_distance;
+query III
+SELECT DISTINCT
+    entity_id,
+    name,
+    hop_distance
+FROM (
+    FROM GRAPH_TABLE(pg
+        MATCH p = (a:Student WHERE a.id = 0)-[e:know]-{1,3}(b:Student WHERE b.id > 0)
+        COLUMNS (
+            b.id AS entity_id,
+            COALESCE(b.name, 'unknown') AS name,
+            path_length(p) AS hop_distance
+        )
+    )
+) g
+ORDER BY hop_distance, name
+LIMIT 500;
+----
+2	Gabor	1
+3	Peter	1
+1	Tavneet	1
+4	David	2

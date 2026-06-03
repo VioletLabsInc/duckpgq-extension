@@ -15,6 +15,7 @@
 #include "duckdb/parser/expression/columnref_expression.hpp"
 #include "duckdb/parser/query_node/select_node.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
+#include "duckdb/parser/statement/extension_statement.hpp"
 
 namespace duckdb {
 
@@ -53,16 +54,61 @@ BoundStatement BindNativePropertyGraphStatement(Binder &binder, SQLStatement &st
 	return duckpgq_binder->Bind(stmt);
 }
 
+BoundStatement BindPreparedPGQStatement(ClientContext &context, Binder &binder, DuckPGQState &duckpgq_state) {
+	auto duckpgq_parse_data = dynamic_cast<DuckPGQParseData *>(duckpgq_state.parse_data.get());
+	if (!duckpgq_parse_data) {
+		return BoundStatement();
+	}
+	auto duckpgq_binder = Binder::CreateBinder(context, &binder);
+	return duckpgq_binder->Bind(*duckpgq_parse_data->statement);
+}
+
+BoundStatement BindNativePGQStatement(ClientContext &context, Binder &binder, SQLStatement &statement,
+                                      DuckPGQState &duckpgq_state) {
+	if (!duckpgq_statement_contains_pgq(&statement)) {
+		return BoundStatement();
+	}
+
+	duckpgq_state.parse_data = make_uniq_base<ParserExtensionParseData, DuckPGQParseData>(statement.Copy());
+	auto *parse_data = dynamic_cast<DuckPGQParseData *>(duckpgq_state.parse_data.get());
+	duckpgq_transform_match_expressions(parse_data->statement.get(), duckpgq_state);
+
+	auto duckpgq_binder = Binder::CreateBinder(context, &binder);
+	return duckpgq_binder->Bind(*parse_data->statement);
+}
+
+SQLStatement *GetBindableStatement(SQLStatement &statement) {
+	if (statement.type == StatementType::EXTENSION_STATEMENT) {
+		auto &extension_statement = statement.Cast<ExtensionStatement>();
+		auto *parse_data = dynamic_cast<DuckPGQParseData *>(extension_statement.parse_data.get());
+		if (parse_data) {
+			return parse_data->statement.get();
+		}
+	}
+	return &statement;
+}
+
 } // namespace
 
 BoundStatement duckpgq_bind(ClientContext &context, Binder &binder, OperatorExtensionInfo *info,
                             SQLStatement &statement) {
 	auto duckpgq_state = GetDuckPGQState(context);
 
-	auto duckpgq_parse_data = dynamic_cast<DuckPGQParseData *>(duckpgq_state->parse_data.get());
-	if (duckpgq_parse_data) {
-		auto duckpgq_binder = Binder::CreateBinder(context, &binder);
-		return duckpgq_binder->Bind(*(duckpgq_parse_data->statement));
+	if (duckpgq_state->parse_data) {
+		return BindPreparedPGQStatement(context, binder, *duckpgq_state);
+	}
+
+	auto *bindable_statement = GetBindableStatement(statement);
+	if (bindable_statement != &statement && duckpgq_statement_contains_pgq(bindable_statement)) {
+		duckpgq_state->parse_data = make_uniq_base<ParserExtensionParseData, DuckPGQParseData>(bindable_statement->Copy());
+		auto *parse_data = dynamic_cast<DuckPGQParseData *>(duckpgq_state->parse_data.get());
+		duckpgq_transform_match_expressions(parse_data->statement.get(), *duckpgq_state);
+		return BindPreparedPGQStatement(context, binder, *duckpgq_state);
+	}
+
+	auto native_bind = BindNativePGQStatement(context, binder, statement, *duckpgq_state);
+	if (native_bind.plan) {
+		return native_bind;
 	}
 
 	return BindNativePropertyGraphStatement(binder, statement, *duckpgq_state);

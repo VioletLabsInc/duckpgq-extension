@@ -33,6 +33,10 @@ ParserExtensionPlanResult duckpgq_handle_statement(SQLStatement *statement, Duck
 
 void duckpgq_find_match_function(TableRef *table_ref, DuckPGQState &duckpgq_state);
 
+bool duckpgq_statement_contains_pgq(SQLStatement *statement);
+
+void duckpgq_transform_match_expressions(SQLStatement *statement, DuckPGQState &duckpgq_state);
+
 struct DuckPGQParserExtension : ParserExtension {
 	DuckPGQParserExtension() : ParserExtension() {
 		parse_function = duckpgq_parse;
