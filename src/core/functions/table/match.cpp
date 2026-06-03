@@ -1019,7 +1019,7 @@ unique_ptr<TableRef> PGQMatchFunction::MatchBindReplace(ClientContext &context, 
 
 	MatchExpression *ref = nullptr;
 	if (bind_input.ref.match_expression) {
-		ref = const_cast<TableFunctionRef &>(bind_input.ref).match_expression.get();
+		ref = bind_input.ref.match_expression.get();
 	} else if (!bind_input.inputs.empty()) {
 		auto match_index = bind_input.inputs[0].GetValue<int32_t>();
 		auto lookup = duckpgq_state->transform_expression.find(match_index);
