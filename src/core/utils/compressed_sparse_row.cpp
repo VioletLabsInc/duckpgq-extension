@@ -145,6 +145,9 @@ void SetupSelectNode(unique_ptr<SelectNode> &select_node, const shared_ptr<Prope
 // Function to create a subquery expression for counting table entries
 unique_ptr<SubqueryExpression> GetCountTable(const shared_ptr<PropertyGraphTable> &table, const string &table_alias,
                                              const string &primary_key) {
+	if (!table) {
+		throw BinderException("Vertex table '%s' is not registered in the property graph", table_alias);
+	}
 	auto select_count = make_uniq<SelectStatement>();
 	auto select_inner = make_uniq<SelectNode>();
 	auto ref = table->CreateBaseTableRef(table_alias);

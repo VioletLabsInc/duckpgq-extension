@@ -91,6 +91,10 @@ public:
 	static PathElement *HandleNestedSubPath(unique_ptr<PathReference> &path_reference,
 	                                        vector<unique_ptr<ParsedExpression>> &conditions, idx_t element_idx);
 
+	static unique_ptr<ParsedExpression> BuildPathHopLengthExpression(const string &prev_binding,
+	                                                                 const string &next_binding,
+	                                                                 const shared_ptr<PropertyGraphTable> &edge_table);
+
 	static unique_ptr<ParsedExpression> AddPathQuantifierCondition(const string &prev_binding,
 	                                                               const string &next_binding,
 	                                                               const shared_ptr<PropertyGraphTable> &edge_table,
