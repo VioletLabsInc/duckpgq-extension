@@ -10,6 +10,7 @@ namespace duckdb {
 // Function to get DuckPGQState from ClientContext
 shared_ptr<DuckPGQState> GetDuckPGQState(ClientContext &context, bool throw_error_not_found = false);
 CreatePropertyGraphInfo *GetPropertyGraphInfo(const shared_ptr<DuckPGQState> &duckpgq_state, const string &pg_name);
+void RewireEdgeTableReferences(CreatePropertyGraphInfo &pg_info);
 shared_ptr<PropertyGraphTable> ValidateSourceNodeAndEdgeTable(CreatePropertyGraphInfo *pg_info,
                                                               const std::string &node_table,
                                                               const std::string &edge_table);

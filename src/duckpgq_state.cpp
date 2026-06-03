@@ -1,4 +1,4 @@
-#include "duckpgq_state.hpp"
+#include "duckpgq/core/utils/duckpgq_utils.hpp"
 
 namespace duckdb {
 
@@ -39,6 +39,10 @@ void DuckPGQState::RetrievePropertyGraphs(const shared_ptr<Connection> &connecti
 	// Retrieve and process edge property graphs
 	auto edge_property_graphs = connection->Query("SELECT * FROM __duckpgq_internal WHERE NOT is_vertex_table");
 	ProcessPropertyGraphs(edge_property_graphs, false);
+
+	for (auto &registered_pg : registered_property_graphs) {
+		RewireEdgeTableReferences(registered_pg.second->Cast<CreatePropertyGraphInfo>());
+	}
 }
 
 void DuckPGQState::ProcessPropertyGraphs(unique_ptr<MaterializedQueryResult> &property_graphs, bool is_vertex) {
@@ -151,10 +155,13 @@ void DuckPGQState::RegisterPropertyGraph(const shared_ptr<PropertyGraphTable> &t
 	} else {
 		table->source_pg_table =
 		    pg_info.GetTableByName(table->source_catalog, table->source_schema, table->source_reference);
-		D_ASSERT(table->source_pg_table);
 		table->destination_pg_table =
 		    pg_info.GetTableByName(table->destination_catalog, table->destination_schema, table->destination_reference);
-		D_ASSERT(table->destination_pg_table);
+		if (!table->source_pg_table || !table->destination_pg_table) {
+			throw BinderException(
+			    "Edge table '%s' in property graph '%s' references vertex tables that are not registered",
+			    table->table_name, graph_name);
+		}
 		pg_info.edge_tables.push_back(table);
 	}
 }

@@ -38,6 +38,20 @@ CreatePropertyGraphInfo *GetPropertyGraphInfo(const shared_ptr<DuckPGQState> &du
 	return dynamic_cast<CreatePropertyGraphInfo *>(property_graph->second.get());
 }
 
+void RewireEdgeTableReferences(CreatePropertyGraphInfo &pg_info) {
+	for (auto &edge_table : pg_info.edge_tables) {
+		edge_table->source_pg_table =
+		    pg_info.GetTableByName(edge_table->source_catalog, edge_table->source_schema, edge_table->source_reference);
+		edge_table->destination_pg_table = pg_info.GetTableByName(
+		    edge_table->destination_catalog, edge_table->destination_schema, edge_table->destination_reference);
+		if (!edge_table->source_pg_table || !edge_table->destination_pg_table) {
+			throw BinderException(
+			    "Edge table '%s' in property graph '%s' references vertex tables that are not registered",
+			    edge_table->table_name, pg_info.property_graph_name);
+		}
+	}
+}
+
 // Function to validate the source node and edge table
 shared_ptr<PropertyGraphTable> ValidateSourceNodeAndEdgeTable(CreatePropertyGraphInfo *pg_info,
                                                               const std::string &node_label,

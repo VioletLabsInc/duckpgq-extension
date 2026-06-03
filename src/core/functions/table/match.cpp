@@ -653,37 +653,50 @@ PGQMatchFunction::AddPathQuantifierCondition(const string &prev_binding, const s
 	return make_uniq<BetweenExpression>(std::move(addition_function), std::move(lower_limit), std::move(upper_limit));
 }
 
-static bool TryGetSingleVariableLengthEdge(vector<unique_ptr<PathReference>> &path_list,
-                                           CreatePropertyGraphInfo &pg_table, string &prev_binding,
-                                           string &next_binding, shared_ptr<PropertyGraphTable> &edge_table) {
+static PathElement *ResolvePathVertexElement(const unique_ptr<PathReference> &path_reference) {
+	auto path_element = PGQMatchFunction::GetPathElement(path_reference);
+	if (path_element) {
+		return path_element;
+	}
+	auto vertex_subpath = dynamic_cast<SubPath *>(path_reference.get());
+	if (!vertex_subpath || vertex_subpath->path_list.empty()) {
+		return nullptr;
+	}
+	return PGQMatchFunction::GetPathElement(vertex_subpath->path_list[0]);
+}
+
+static bool TryGetVariableLengthEdgeForPathLength(vector<unique_ptr<PathReference>> &path_list,
+                                                  CreatePropertyGraphInfo &pg_table, string &prev_binding,
+                                                  string &next_binding, shared_ptr<PropertyGraphTable> &edge_table) {
+	// path_length via iterativelength is only correct for a single (source)-[edge]-{lower,upper}(target) pattern
 	if (path_list.size() != 3) {
 		return false;
 	}
-	auto edge_subpath = dynamic_cast<SubPath *>(path_list[1].get());
-	if (!edge_subpath || edge_subpath->upper <= 1 || edge_subpath->path_list.size() != 1) {
-		return false;
-	}
-	auto previous_vertex_element = PGQMatchFunction::GetPathElement(path_list[0]);
-	if (!previous_vertex_element) {
-		auto previous_vertex_subpath = reinterpret_cast<SubPath *>(path_list[0].get());
-		if (previous_vertex_subpath->path_list.size() != 1) {
-			return false;
+	for (idx_t idx = 1; idx + 1 < path_list.size(); idx += 2) {
+		auto edge_subpath = dynamic_cast<SubPath *>(path_list[idx].get());
+		if (!edge_subpath || edge_subpath->upper <= 1 || edge_subpath->path_list.empty()) {
+			continue;
 		}
-		previous_vertex_element = PGQMatchFunction::GetPathElement(previous_vertex_subpath->path_list[0]);
-	}
-	auto next_vertex_element = PGQMatchFunction::GetPathElement(path_list[2]);
-	if (!next_vertex_element) {
-		auto next_vertex_subpath = reinterpret_cast<SubPath *>(path_list[2].get());
-		if (next_vertex_subpath->path_list.size() != 1) {
-			return false;
+		auto previous_vertex_element = ResolvePathVertexElement(path_list[idx - 1]);
+		auto next_vertex_element = ResolvePathVertexElement(path_list[idx + 1]);
+		if (!previous_vertex_element || !next_vertex_element) {
+			continue;
 		}
-		next_vertex_element = PGQMatchFunction::GetPathElement(next_vertex_subpath->path_list[0]);
+		auto edge_element = PGQMatchFunction::GetPathElement(edge_subpath->path_list[0]);
+		if (!edge_element) {
+			continue;
+		}
+		prev_binding = previous_vertex_element->variable_binding;
+		next_binding = next_vertex_element->variable_binding;
+		edge_table = PGQMatchFunction::FindGraphTable(edge_element->label, pg_table);
+		if (!edge_table->source_pg_table || !edge_table->destination_pg_table) {
+			throw BinderException(
+			    "Edge label '%s' in property graph '%s' is not wired to its source and destination vertex tables",
+			    edge_element->label, pg_table.property_graph_name);
+		}
+		return true;
 	}
-	auto edge_element = PGQMatchFunction::GetPathElement(edge_subpath->path_list[0]);
-	prev_binding = previous_vertex_element->variable_binding;
-	next_binding = next_vertex_element->variable_binding;
-	edge_table = PGQMatchFunction::FindGraphTable(edge_element->label, pg_table);
-	return true;
+	return false;
 }
 
 void PGQMatchFunction::AddPathFinding(unique_ptr<SelectNode> &select_node,
@@ -767,7 +780,8 @@ void PGQMatchFunction::CheckNamedSubpath(SubPath &subpath, MatchExpression &orig
 			string prev_binding;
 			string next_binding;
 			shared_ptr<PropertyGraphTable> edge_table;
-			if (TryGetSingleVariableLengthEdge(subpath.path_list, pg_table, prev_binding, next_binding, edge_table)) {
+			if (TryGetVariableLengthEdgeForPathLength(subpath.path_list, pg_table, prev_binding, next_binding,
+			                                          edge_table)) {
 				auto path_length_function = BuildPathHopLengthExpression(prev_binding, next_binding, edge_table);
 				path_length_function->alias =
 				    column_alias.empty() ? "path_length(" + subpath.path_variable + ")" : column_alias;
@@ -1063,7 +1077,7 @@ unique_ptr<TableRef> PGQMatchFunction::MatchBindReplace(ClientContext &context, 
 			if (function_ref->function_name == "path_length") {
 				column_ref = dynamic_cast<ColumnRefExpression *>(function_ref->children[0].get());
 				if (column_ref == nullptr) {
-					continue;
+					throw BinderException("path_length requires a path variable reference");
 				}
 				if (named_subpaths.count(column_ref->column_names[0]) && column_ref->column_names.size() == 1) {
 					auto path_ref = make_uniq<ColumnRefExpression>("path", column_ref->column_names[0]);
