@@ -768,17 +768,15 @@ void PGQMatchFunction::CheckNamedSubpath(SubPath &subpath, MatchExpression &orig
 			string next_binding;
 			shared_ptr<PropertyGraphTable> edge_table;
 			if (TryGetSingleVariableLengthEdge(subpath.path_list, pg_table, prev_binding, next_binding, edge_table)) {
-				auto path_length_function =
-				    BuildPathHopLengthExpression(prev_binding, next_binding, edge_table);
+				auto path_length_function = BuildPathHopLengthExpression(prev_binding, next_binding, edge_table);
 				path_length_function->alias =
 				    column_alias.empty() ? "path_length(" + subpath.path_variable + ")" : column_alias;
 				original_ref.column_list.erase(original_ref.column_list.begin() + static_cast<int64_t>(idx_i));
 				original_ref.column_list.insert(original_ref.column_list.begin() + static_cast<int64_t>(idx_i),
 				                                std::move(path_length_function));
 			} else {
-				auto shortest_path_function = CreatePathFindingFunction(subpath.path_list, pg_table,
-				                                                          subpath.path_variable, final_select_node,
-				                                                          conditions);
+				auto shortest_path_function = CreatePathFindingFunction(
+				    subpath.path_list, pg_table, subpath.path_variable, final_select_node, conditions);
 				auto path_len_children = vector<unique_ptr<ParsedExpression>>();
 				path_len_children.push_back(std::move(shortest_path_function));
 				auto path_len = make_uniq<FunctionExpression>("len", std::move(path_len_children));
