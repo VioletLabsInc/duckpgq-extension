@@ -100,7 +100,8 @@ BoundStatement duckpgq_bind(ClientContext &context, Binder &binder, OperatorExte
 
 	auto *bindable_statement = GetBindableStatement(statement);
 	if (bindable_statement != &statement && duckpgq_statement_contains_pgq(bindable_statement)) {
-		duckpgq_state->parse_data = make_uniq_base<ParserExtensionParseData, DuckPGQParseData>(bindable_statement->Copy());
+		duckpgq_state->parse_data =
+		    make_uniq_base<ParserExtensionParseData, DuckPGQParseData>(bindable_statement->Copy());
 		auto *parse_data = dynamic_cast<DuckPGQParseData *>(duckpgq_state->parse_data.get());
 		duckpgq_transform_match_expressions(parse_data->statement.get(), *duckpgq_state);
 		return BindPreparedPGQStatement(context, binder, *duckpgq_state);
