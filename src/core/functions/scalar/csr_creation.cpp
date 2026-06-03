@@ -119,7 +119,7 @@ static void CreateCsrVertexFunction(DataChunk &args, ExpressionState &state, Vec
 	auto &func_expr = state.expr.Cast<BoundFunctionExpression>();
 	auto &info = func_expr.bind_info->Cast<CSRFunctionData>();
 
-	auto duckpgq_state = GetDuckPGQState(info.context);
+	auto duckpgq_state = GetDuckPGQState(info.context, true);
 	int64_t input_size = args.data[1].GetValue(0).GetValue<int64_t>();
 	auto csr_entry = duckpgq_state->csr_list.find(info.id);
 
