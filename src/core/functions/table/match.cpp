@@ -26,6 +26,8 @@
 #include "duckdb/parser/property_graph_table.hpp"
 #include "duckdb/parser/subpath_element.hpp"
 #include <duckdb/common/enums/set_operation_type.hpp>
+#include <duckdb/parser/tableref/matchref.hpp>
+#include <duckdb/parser/tableref/table_function_ref.hpp>
 #include <duckpgq/core/functions/table.hpp>
 #include <duckpgq/core/utils/duckpgq_utils.hpp>
 
@@ -1015,8 +1017,20 @@ void PGQMatchFunction::CheckColumnBinding(
 unique_ptr<TableRef> PGQMatchFunction::MatchBindReplace(ClientContext &context, TableFunctionBindInput &bind_input) {
 	auto duckpgq_state = GetDuckPGQState(context);
 
-	auto match_index = bind_input.inputs[0].GetValue<int32_t>();
-	auto *ref = dynamic_cast<MatchExpression *>(duckpgq_state->transform_expression[match_index].get());
+	MatchExpression *ref = nullptr;
+	if (bind_input.ref.match_expression) {
+		ref = const_cast<TableFunctionRef &>(bind_input.ref).match_expression.get();
+	} else if (!bind_input.inputs.empty()) {
+		auto match_index = bind_input.inputs[0].GetValue<int32_t>();
+		auto lookup = duckpgq_state->transform_expression.find(match_index);
+		if (lookup == duckpgq_state->transform_expression.end() || !lookup->second) {
+			throw BinderException("Failed to resolve MATCH expression index %d for duckpgq_match", match_index);
+		}
+		ref = dynamic_cast<MatchExpression *>(lookup->second.get());
+	}
+	if (!ref) {
+		throw BinderException("Failed to resolve MATCH expression for duckpgq_match");
+	}
 	auto *pg_table = duckpgq_state->GetPropertyGraph(ref->pg_name);
 
 	vector<unique_ptr<ParsedExpression>> conditions;
@@ -1144,7 +1158,17 @@ unique_ptr<TableRef> PGQMatchFunction::MatchBindReplace(ClientContext &context, 
 // Register functions
 //------------------------------------------------------------------------------
 void CoreTableFunctions::RegisterMatchTableFunction(ExtensionLoader &loader) {
-	loader.RegisterFunction(PGQMatchFunction());
+	TableFunctionSet set("duckpgq_match");
+
+	TableFunction native_match;
+	native_match.bind_replace = PGQMatchFunction::MatchBindReplace;
+	set.AddFunction(std::move(native_match));
+
+	TableFunction indexed_match({LogicalType::INTEGER}, nullptr);
+	indexed_match.bind_replace = PGQMatchFunction::MatchBindReplace;
+	set.AddFunction(std::move(indexed_match));
+
+	loader.RegisterFunction(set);
 }
 
 } // namespace duckdb

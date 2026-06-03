@@ -26,18 +26,8 @@
 
 namespace duckdb {
 
-struct PGQMatchFunction : public TableFunction {
+struct PGQMatchFunction {
 public:
-	PGQMatchFunction() {
-		name = "duckpgq_match";
-		arguments.push_back(LogicalType::INTEGER);
-		bind_replace = MatchBindReplace;
-	}
-
-	struct MatchBindData : public TableFunctionData {
-		bool done = false;
-	};
-
 	static shared_ptr<PropertyGraphTable> FindGraphTable(const string &label, CreatePropertyGraphInfo &pg_table);
 
 	static void CheckInheritance(const shared_ptr<PropertyGraphTable> &tableref, PathElement *element,

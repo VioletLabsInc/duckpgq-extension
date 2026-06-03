@@ -38,15 +38,28 @@ ParserExtensionParseResult duckpgq_parse(ParserExtensionInfo *info, const std::s
 void duckpgq_find_match_function(TableRef *table_ref, DuckPGQState &duckpgq_state) {
 	// TODO(dtenwolde) add support for other style of tableRef (e.g. PivotRef)
 	if (auto table_function_ref = dynamic_cast<TableFunctionRef *>(table_ref)) {
-		// Handle TableFunctionRef case
 		auto function = dynamic_cast<FunctionExpression *>(table_function_ref->function.get());
-		if (function->function_name != "duckpgq_match") {
+		if (!function || function->function_name != "duckpgq_match") {
 			return;
 		}
-		table_function_ref->alias = function->children[0]->Cast<MatchExpression>().alias;
+		MatchExpression *match_expr = table_function_ref->match_expression.get();
+		if (!match_expr && !function->children.empty()) {
+			match_expr = dynamic_cast<MatchExpression *>(function->children[0].get());
+		}
+		if (!match_expr) {
+			throw BinderException("duckpgq_match is missing a MATCH expression");
+		}
+		if (table_function_ref->alias.empty()) {
+			table_function_ref->alias = match_expr->alias;
+		}
 		int32_t match_index = duckpgq_state.match_index++;
-		duckpgq_state.transform_expression[match_index] = std::move(function->children[0]);
-		function->children.pop_back();
+		if (table_function_ref->match_expression) {
+			duckpgq_state.transform_expression[match_index] =
+			    unique_ptr_cast<MatchExpression, ParsedExpression>(std::move(table_function_ref->match_expression));
+		} else {
+			duckpgq_state.transform_expression[match_index] = std::move(function->children[0]);
+		}
+		function->children.clear();
 		auto function_identifier = make_uniq<ConstantExpression>(Value::CreateValue(match_index));
 		function->children.push_back(std::move(function_identifier));
 	} else if (auto join_ref = dynamic_cast<JoinRef *>(table_ref)) {
