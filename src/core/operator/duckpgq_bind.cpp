@@ -92,12 +92,31 @@ SQLStatement *GetBindableStatement(SQLStatement &statement) {
 
 } // namespace
 
+static bool ParseDataAppliesToStatement(SQLStatement &statement, DuckPGQState &duckpgq_state) {
+	auto *parse_data = dynamic_cast<DuckPGQParseData *>(duckpgq_state.parse_data.get());
+	if (!parse_data || !parse_data->statement) {
+		return false;
+	}
+	if (parse_data->statement.get() == &statement) {
+		return true;
+	}
+	// duckpgq_plan moves ExtensionStatement::parse_data onto duckpgq_state before throwing.
+	if (statement.type == StatementType::EXTENSION_STATEMENT) {
+		return true;
+	}
+	return false;
+}
+
 BoundStatement duckpgq_bind(ClientContext &context, Binder &binder, OperatorExtensionInfo *info,
                             SQLStatement &statement) {
 	auto duckpgq_state = GetDuckPGQState(context);
 
 	if (duckpgq_state->parse_data) {
-		return BindPreparedPGQStatement(context, binder, *duckpgq_state);
+		if (!ParseDataAppliesToStatement(statement, *duckpgq_state)) {
+			duckpgq_state->parse_data.reset();
+		} else {
+			return BindPreparedPGQStatement(context, binder, *duckpgq_state);
+		}
 	}
 
 	auto *bindable_statement = GetBindableStatement(statement);
