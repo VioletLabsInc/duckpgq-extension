@@ -35,7 +35,7 @@ namespace duckdb {
 
 static bool StatementContainsPGQ(SQLStatement *statement);
 
-MatchExpression *GetDuckPGQMatchExpression(TableFunctionRef &ref) {
+MatchExpression *GetDuckPGQMatchExpression(const TableFunctionRef &ref) {
 	auto *function = dynamic_cast<FunctionExpression *>(ref.function.get());
 	if (!function || function->function_name != "duckpgq_match") {
 		return nullptr;
