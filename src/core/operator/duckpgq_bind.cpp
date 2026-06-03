@@ -65,7 +65,7 @@ BoundStatement BindPreparedPGQStatement(ClientContext &context, Binder &binder, 
 
 BoundStatement BindNativePGQStatement(ClientContext &context, Binder &binder, SQLStatement &statement,
                                       DuckPGQState &duckpgq_state) {
-	if (!duckpgq_statement_contains_pgq(&statement)) {
+	if (!duckpgq_statement_contains_graph_table(&statement)) {
 		return BoundStatement();
 	}
 
@@ -96,17 +96,12 @@ BoundStatement duckpgq_bind(ClientContext &context, Binder &binder, OperatorExte
                             SQLStatement &statement) {
 	auto duckpgq_state = GetDuckPGQState(context);
 
-	auto native_bind = BindNativePGQStatement(context, binder, statement, *duckpgq_state);
-	if (native_bind.plan) {
-		return native_bind;
-	}
-
 	if (duckpgq_state->parse_data) {
 		return BindPreparedPGQStatement(context, binder, *duckpgq_state);
 	}
 
 	auto *bindable_statement = GetBindableStatement(statement);
-	if (bindable_statement != &statement && duckpgq_statement_contains_pgq(bindable_statement)) {
+	if (bindable_statement != &statement && duckpgq_statement_contains_graph_table(bindable_statement)) {
 		duckpgq_state->transform_expression.clear();
 		duckpgq_state->match_index = 0;
 		duckpgq_state->parse_data =
@@ -114,6 +109,11 @@ BoundStatement duckpgq_bind(ClientContext &context, Binder &binder, OperatorExte
 		auto *parse_data = dynamic_cast<DuckPGQParseData *>(duckpgq_state->parse_data.get());
 		duckpgq_transform_match_expressions(parse_data->statement.get(), *duckpgq_state);
 		return BindPreparedPGQStatement(context, binder, *duckpgq_state);
+	}
+
+	auto native_bind = BindNativePGQStatement(context, binder, statement, *duckpgq_state);
+	if (native_bind.plan) {
+		return native_bind;
 	}
 
 	return BindNativePropertyGraphStatement(binder, statement, *duckpgq_state);

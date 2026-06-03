@@ -42,6 +42,9 @@ MatchExpression *GetDuckPGQMatchExpression(const TableFunctionRef &ref);
 
 bool duckpgq_statement_contains_pgq(SQLStatement *statement);
 
+//! True when the statement contains a duckpgq_match / GRAPH_TABLE reference.
+bool duckpgq_statement_contains_graph_table(SQLStatement *statement);
+
 void duckpgq_transform_match_expressions(SQLStatement *statement, DuckPGQState &duckpgq_state);
 
 struct DuckPGQParserExtension : ParserExtension {

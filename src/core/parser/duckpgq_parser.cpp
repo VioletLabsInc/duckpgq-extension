@@ -152,6 +152,36 @@ static bool StatementContainsPGQ(SQLStatement *statement) {
 	}
 }
 
+static bool StatementContainsGraphTableMatch(SQLStatement *statement) {
+	if (!statement) {
+		return false;
+	}
+	switch (statement->type) {
+	case StatementType::SELECT_STATEMENT:
+		return QueryNodeContainsPGQ(statement->Cast<SelectStatement>().node.get());
+	case StatementType::CREATE_STATEMENT: {
+		auto create_table = dynamic_cast<CreateTableInfo *>(statement->Cast<CreateStatement>().info.get());
+		return create_table && StatementContainsGraphTableMatch(create_table->query.get());
+	}
+	case StatementType::EXPLAIN_STATEMENT:
+		return StatementContainsGraphTableMatch(statement->Cast<ExplainStatement>().stmt.get());
+	case StatementType::COPY_STATEMENT: {
+		auto &copy_statement = statement->Cast<CopyStatement>();
+		auto select_node = dynamic_cast<SelectNode *>(copy_statement.info->select_statement.get());
+		return select_node && TableRefContainsPGQ(select_node->from_table.get());
+	}
+	case StatementType::INSERT_STATEMENT:
+		return StatementContainsGraphTableMatch(statement->Cast<InsertStatement>().select_statement.get());
+	case StatementType::EXTENSION_STATEMENT: {
+		auto &extension_statement = statement->Cast<ExtensionStatement>();
+		auto *parse_data = dynamic_cast<DuckPGQParseData *>(extension_statement.parse_data.get());
+		return parse_data && StatementContainsGraphTableMatch(parse_data->statement.get());
+	}
+	default:
+		return false;
+	}
+}
+
 static bool QueryMightContainPGQ(const string &query) {
 	auto lower_query = StringUtil::Lower(query);
 	return StringUtil::Contains(lower_query, "graph_table");
@@ -168,6 +198,10 @@ static ParserExtension MakeDuckPGQParserExtension() {
 
 bool duckpgq_statement_contains_pgq(SQLStatement *statement) {
 	return StatementContainsPGQ(statement);
+}
+
+bool duckpgq_statement_contains_graph_table(SQLStatement *statement) {
+	return StatementContainsGraphTableMatch(statement);
 }
 
 void duckpgq_transform_match_expressions(SQLStatement *statement, DuckPGQState &duckpgq_state) {
