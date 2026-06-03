@@ -273,9 +273,8 @@ static void RewireEdgeTableReferences(CreatePropertyGraphInfo &pg_info) {
 	for (auto &edge_table : pg_info.edge_tables) {
 		edge_table->source_pg_table =
 		    pg_info.GetTableByName(edge_table->source_catalog, edge_table->source_schema, edge_table->source_reference);
-		edge_table->destination_pg_table = pg_info.GetTableByName(edge_table->destination_catalog,
-		                                                          edge_table->destination_schema,
-		                                                          edge_table->destination_reference);
+		edge_table->destination_pg_table = pg_info.GetTableByName(
+		    edge_table->destination_catalog, edge_table->destination_schema, edge_table->destination_reference);
 	}
 }
 
