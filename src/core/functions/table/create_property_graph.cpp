@@ -269,6 +269,16 @@ CreatePropertyGraphFunction::CreatePropertyGraphInit(ClientContext &context, Tab
 	return make_uniq<CreatePropertyGraphGlobalData>();
 }
 
+static void RewireEdgeTableReferences(CreatePropertyGraphInfo &pg_info) {
+	for (auto &edge_table : pg_info.edge_tables) {
+		edge_table->source_pg_table =
+		    pg_info.GetTableByName(edge_table->source_catalog, edge_table->source_schema, edge_table->source_reference);
+		edge_table->destination_pg_table = pg_info.GetTableByName(edge_table->destination_catalog,
+		                                                          edge_table->destination_schema,
+		                                                          edge_table->destination_reference);
+	}
+}
+
 void CreatePropertyGraphFunction::CreatePropertyGraphFunc(ClientContext &context, TableFunctionInput &data_p,
                                                           DataChunk &output) {
 	auto &bind_data = data_p.bind_data->Cast<CreatePropertyGraphBindData>();
@@ -277,7 +287,9 @@ void CreatePropertyGraphFunction::CreatePropertyGraphFunc(ClientContext &context
 
 	for (auto &local_client_context : ConnectionManager::Get(*context.db).GetConnectionList()) {
 		auto local_state = GetDuckPGQState(*local_client_context);
-		local_state->registered_property_graphs[pg_info->property_graph_name] = pg_info->Copy();
+		auto registered_pg = unique_ptr_cast<CreateInfo, CreatePropertyGraphInfo>(pg_info->Copy());
+		RewireEdgeTableReferences(*registered_pg);
+		local_state->registered_property_graphs[pg_info->property_graph_name] = std::move(registered_pg);
 	}
 
 	duckpgq_state->InitializeInternalTable(context);

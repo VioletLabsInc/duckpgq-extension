@@ -380,6 +380,9 @@ PathElement *PGQMatchFunction::HandleNestedSubPath(unique_ptr<PathReference> &pa
 unique_ptr<ParsedExpression> PGQMatchFunction::CreateWhereClause(vector<unique_ptr<ParsedExpression>> &conditions) {
 	unique_ptr<ParsedExpression> where_clause;
 	for (auto &condition : conditions) {
+		if (!condition) {
+			continue;
+		}
 		if (where_clause) {
 			where_clause = make_uniq<ConjunctionExpression>(ExpressionType::CONJUNCTION_AND, std::move(where_clause),
 			                                                std::move(condition));
@@ -487,11 +490,11 @@ unique_ptr<ParsedExpression> PGQMatchFunction::CreatePathFindingFunction(
 			if (edge_subpath->upper > 1) {
 				// (un)bounded shortest path
 				// Add the shortest path UDF as a CTE
-				if (previous_vertex_subpath) {
-					path_finding_conditions.push_back(std::move(previous_vertex_subpath->where_clause));
+				if (previous_vertex_subpath && previous_vertex_subpath->where_clause) {
+					path_finding_conditions.push_back(previous_vertex_subpath->where_clause->Copy());
 				}
-				if (next_vertex_subpath) {
-					path_finding_conditions.push_back(std::move(next_vertex_subpath->where_clause));
+				if (next_vertex_subpath && next_vertex_subpath->where_clause) {
+					path_finding_conditions.push_back(next_vertex_subpath->where_clause->Copy());
 				}
 				if (final_select_node->cte_map.map.find("cte1") == final_select_node->cte_map.map.end()) {
 					edge_element = reinterpret_cast<PathElement *>(edge_subpath->path_list[0].get());
@@ -552,12 +555,6 @@ unique_ptr<ParsedExpression> PGQMatchFunction::CreatePathFindingFunction(
 				previous_vertex_element = next_vertex_element;
 				continue;
 			}
-			if (previous_vertex_subpath) {
-				conditions.push_back(std::move(previous_vertex_subpath->where_clause));
-			}
-			if (next_vertex_subpath) {
-				conditions.push_back(std::move(next_vertex_subpath->where_clause));
-			}
 			edge_element = GetPathElement(edge_subpath->path_list[0]);
 		}
 		auto previous_rowid = make_uniq<ColumnRefExpression>("rowid", previous_vertex_element->variable_binding);
@@ -583,6 +580,9 @@ unique_ptr<ParsedExpression> PGQMatchFunction::CreatePathFindingFunction(
 		previous_vertex_subpath = next_vertex_subpath;
 	}
 
+	if (!final_list) {
+		throw InternalException("Unable to construct path list for path variable '%s'", path_variable);
+	}
 	return final_list;
 }
 
