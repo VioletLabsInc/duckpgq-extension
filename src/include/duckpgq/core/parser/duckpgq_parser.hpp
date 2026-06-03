@@ -24,6 +24,9 @@ ParserExtensionParseResult duckpgq_parse(ParserExtensionInfo *info, const std::s
 ParserExtensionPlanResult duckpgq_plan(ParserExtensionInfo *info, ClientContext &,
                                        unique_ptr<ParserExtensionParseData>);
 
+ParserOverrideResult duckpgq_parser_override(ParserExtensionInfo *info, const std::string &query,
+                                             ParserOptions &options);
+
 ParserExtensionPlanResult duckpgq_find_select_statement(SQLStatement *statement, DuckPGQState &duckpgq_state);
 
 ParserExtensionPlanResult duckpgq_handle_statement(SQLStatement *statement, DuckPGQState &duckpgq_state);
@@ -34,6 +37,7 @@ struct DuckPGQParserExtension : ParserExtension {
 	DuckPGQParserExtension() : ParserExtension() {
 		parse_function = duckpgq_parse;
 		plan_function = duckpgq_plan;
+		parser_override = duckpgq_parser_override;
 		parser_info = make_shared_ptr<DuckPGQParserExtensionInfo>();
 	}
 };

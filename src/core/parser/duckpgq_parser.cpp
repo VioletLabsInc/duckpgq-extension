@@ -22,8 +22,159 @@
 
 #include "duckdb/main/extension_callback_manager.hpp"
 #include "duckpgq/core/utils/duckpgq_utils.hpp"
+#include "duckdb/common/enums/allow_parser_override.hpp"
+#include "duckdb/main/config.hpp"
+#include "duckdb/parser/parsed_data/create_property_graph_info.hpp"
+#include "duckdb/parser/parsed_data/drop_property_graph_info.hpp"
+#include "duckdb/parser/query_node/set_operation_node.hpp"
+#include "duckdb/parser/statement/explain_statement.hpp"
+#include "duckdb/parser/statement/extension_statement.hpp"
+#include "duckdb/parser/statement/select_statement.hpp"
 
 namespace duckdb {
+
+namespace {
+
+static bool StatementContainsPGQ(SQLStatement *statement);
+
+static bool TableRefContainsPGQ(TableRef *table_ref) {
+	if (!table_ref) {
+		return false;
+	}
+	if (auto table_function_ref = dynamic_cast<TableFunctionRef *>(table_ref)) {
+		if (table_function_ref->match_expression) {
+			return true;
+		}
+		auto function = dynamic_cast<FunctionExpression *>(table_function_ref->function.get());
+		return function && function->function_name == "duckpgq_match";
+	}
+	if (auto join_ref = dynamic_cast<JoinRef *>(table_ref)) {
+		return TableRefContainsPGQ(join_ref->left.get()) || TableRefContainsPGQ(join_ref->right.get());
+	}
+	if (auto subquery_ref = dynamic_cast<SubqueryRef *>(table_ref)) {
+		return StatementContainsPGQ(subquery_ref->subquery.get());
+	}
+	return false;
+}
+
+static bool SelectNodeContainsPGQ(SelectNode *node) {
+	if (!node) {
+		return false;
+	}
+	if (TableRefContainsPGQ(node->from_table.get())) {
+		return true;
+	}
+	for (auto const &kv_pair : node->cte_map.map) {
+		auto const &cte = kv_pair.second;
+		if (StatementContainsPGQ(cte->query.get())) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool QueryNodeContainsPGQ(QueryNode *node) {
+	if (!node) {
+		return false;
+	}
+	if (auto select_node = dynamic_cast<SelectNode *>(node)) {
+		return SelectNodeContainsPGQ(select_node);
+	}
+	if (auto cte_node = dynamic_cast<CTENode *>(node)) {
+		return QueryNodeContainsPGQ(cte_node->child.get());
+	}
+	if (auto set_operation_node = dynamic_cast<SetOperationNode *>(node)) {
+		for (auto &child : set_operation_node->children) {
+			if (QueryNodeContainsPGQ(child.get())) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+static bool StatementContainsPGQ(SQLStatement *statement) {
+	if (!statement) {
+		return false;
+	}
+	switch (statement->type) {
+	case StatementType::SELECT_STATEMENT:
+		return QueryNodeContainsPGQ(statement->Cast<SelectStatement>().node.get());
+	case StatementType::CREATE_STATEMENT: {
+		auto &create_statement = statement->Cast<CreateStatement>();
+		if (dynamic_cast<CreatePropertyGraphInfo *>(create_statement.info.get())) {
+			return true;
+		}
+		auto create_table = dynamic_cast<CreateTableInfo *>(create_statement.info.get());
+		return create_table && StatementContainsPGQ(create_table->query.get());
+	}
+	case StatementType::DROP_STATEMENT:
+		return dynamic_cast<DropPropertyGraphInfo *>(statement->Cast<DropStatement>().info.get()) != nullptr;
+	case StatementType::EXPLAIN_STATEMENT:
+		return StatementContainsPGQ(statement->Cast<ExplainStatement>().stmt.get());
+	case StatementType::COPY_STATEMENT: {
+		auto &copy_statement = statement->Cast<CopyStatement>();
+		auto select_node = dynamic_cast<SelectNode *>(copy_statement.info->select_statement.get());
+		return select_node && TableRefContainsPGQ(select_node->from_table.get());
+	}
+	case StatementType::INSERT_STATEMENT:
+		return StatementContainsPGQ(statement->Cast<InsertStatement>().select_statement.get());
+	default:
+		return false;
+	}
+}
+
+static bool QueryMightContainPGQ(const string &query) {
+	auto lower_query = StringUtil::Lower(query);
+	return StringUtil::Contains(lower_query, "graph_table") || StringUtil::Contains(lower_query, "property graph");
+}
+
+static ParserExtension MakeDuckPGQParserExtension() {
+	ParserExtension extension;
+	extension.parse_function = duckpgq_parse;
+	extension.plan_function = duckpgq_plan;
+	extension.parser_override = duckpgq_parser_override;
+	extension.parser_info = make_shared_ptr<DuckPGQParserExtensionInfo>();
+	return extension;
+}
+
+} // namespace
+
+ParserOverrideResult duckpgq_parser_override(ParserExtensionInfo *, const string &query, ParserOptions &options) {
+	if (!QueryMightContainPGQ(query)) {
+		return ParserOverrideResult();
+	}
+
+	try {
+		ParserOptions inner_options = options;
+		inner_options.parser_override_setting = AllowParserOverride::DEFAULT_OVERRIDE;
+		Parser parser(inner_options);
+		parser.ParseQuery(query);
+		if (parser.statements.empty()) {
+			return ParserOverrideResult();
+		}
+
+		vector<unique_ptr<SQLStatement>> result;
+		bool contains_pgq = false;
+		auto extension = MakeDuckPGQParserExtension();
+		for (auto &statement : parser.statements) {
+			if (StatementContainsPGQ(statement.get())) {
+				contains_pgq = true;
+				result.push_back(make_uniq<ExtensionStatement>(
+				    extension, make_uniq_base<ParserExtensionParseData, DuckPGQParseData>(statement->Copy())));
+			} else {
+				result.push_back(std::move(statement));
+			}
+		}
+
+		if (!contains_pgq) {
+			return ParserOverrideResult();
+		}
+		return ParserOverrideResult(std::move(result));
+	} catch (std::exception &error) {
+		return ParserOverrideResult(error);
+	}
+}
 
 ParserExtensionParseResult duckpgq_parse(ParserExtensionInfo *info, const std::string &query) {
 	Parser parser;
@@ -209,6 +360,8 @@ ParserExtensionPlanResult duckpgq_plan(ParserExtensionInfo *, ClientContext &con
 //------------------------------------------------------------------------------
 void CorePGQParser::RegisterPGQParserExtension(ExtensionLoader &loader) {
 	auto &db = loader.GetDatabaseInstance();
+	auto &config = DBConfig::GetConfig(db);
+	config.SetOptionByName("allow_parser_override_extension", Value("fallback"));
 	auto &manager = ExtensionCallbackManager::Get(db);
 	manager.Register(DuckPGQParserExtension());
 }

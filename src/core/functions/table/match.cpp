@@ -1027,6 +1027,11 @@ unique_ptr<TableRef> PGQMatchFunction::MatchBindReplace(ClientContext &context, 
 			throw BinderException("Failed to resolve MATCH expression index %d for duckpgq_match", match_index);
 		}
 		ref = dynamic_cast<MatchExpression *>(lookup->second.get());
+	} else if (bind_input.ref.function) {
+		auto *func_expr = dynamic_cast<FunctionExpression *>(bind_input.ref.function.get());
+		if (func_expr && !func_expr->children.empty()) {
+			ref = dynamic_cast<MatchExpression *>(func_expr->children[0].get());
+		}
 	}
 	if (!ref) {
 		throw BinderException("Failed to resolve MATCH expression for duckpgq_match");
