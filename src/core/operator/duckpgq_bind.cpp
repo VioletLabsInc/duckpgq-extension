@@ -38,10 +38,9 @@ BoundStatement BindNativePropertyGraphStatement(Binder &binder, SQLStatement &st
 	duckpgq_state.parse_data = make_uniq_base<ParserExtensionParseData, DuckPGQParseData>(statement.Copy());
 
 	auto table_function_ref = make_uniq<TableFunctionRef>();
-	const char *function_name = statement.type == StatementType::CREATE_STATEMENT ? "create_property_graph"
-	                                                                              : "drop_property_graph";
-	table_function_ref->function =
-	    make_uniq<FunctionExpression>(function_name, vector<unique_ptr<ParsedExpression>>());
+	const char *function_name =
+	    statement.type == StatementType::CREATE_STATEMENT ? "create_property_graph" : "drop_property_graph";
+	table_function_ref->function = make_uniq<FunctionExpression>(function_name, vector<unique_ptr<ParsedExpression>>());
 
 	auto select = make_uniq<SelectStatement>();
 	auto select_node = make_uniq<SelectNode>();
