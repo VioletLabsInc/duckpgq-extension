@@ -40,14 +40,14 @@ MatchExpression *GetDuckPGQMatchExpression(const TableFunctionRef &ref) {
 	if (!function || function->function_name != "duckpgq_match") {
 		return nullptr;
 	}
+	// Stock DuckDB v1.5.3 stores MatchExpression in function->children[0].
+	// The DuckDB-PGQ fork stores it in TableFunctionRef::match_expression, but
+	// accessing that field causes ABI issues when the extension runs on stock DuckDB.
+	// For production compatibility, we only check children[0].
 	if (!function->children.empty()) {
 		if (auto *match_expr = dynamic_cast<MatchExpression *>(function->children[0].get())) {
 			return match_expr;
 		}
-		return nullptr;
-	}
-	if (ref.match_expression) {
-		return ref.match_expression.get();
 	}
 	return nullptr;
 }
@@ -57,11 +57,13 @@ static bool TableFunctionRefContainsPGQ(TableFunctionRef &table_function_ref) {
 	if (!function || function->function_name != "duckpgq_match") {
 		return false;
 	}
+	// Stock DuckDB stores MatchExpression in function->children[0].
+	// Do NOT access table_function_ref.match_expression - ABI-incompatible with stock DuckDB.
 	if (!function->children.empty()) {
 		return dynamic_cast<MatchExpression *>(function->children[0].get()) != nullptr ||
 		       function->children[0]->GetExpressionType() == ExpressionType::VALUE_CONSTANT;
 	}
-	return table_function_ref.match_expression != nullptr;
+	return false;
 }
 
 static bool TableRefContainsPGQ(TableRef *table_ref) {
@@ -323,13 +325,17 @@ void duckpgq_find_match_function(TableRef *table_ref, DuckPGQState &duckpgq_stat
 			table_function_ref->alias = match_expr->alias;
 		}
 		int32_t match_index = duckpgq_state.match_index++;
+		// Stock DuckDB v1.5.3 stores MatchExpression in function->children[0].
+		// The DuckDB-PGQ fork stores it in TableFunctionRef::match_expression, but
+		// accessing that field causes ABI issues when the extension runs on stock DuckDB.
+		// If you're building against the fork and get this error, update the fork to
+		// store MatchExpression in function->children[0] for stock DuckDB compatibility.
 		if (!function->children.empty() && dynamic_cast<MatchExpression *>(function->children[0].get())) {
 			duckpgq_state.transform_expression[match_index] = std::move(function->children[0]);
-		} else if (table_function_ref->match_expression) {
-			duckpgq_state.transform_expression[match_index] =
-			    unique_ptr_cast<MatchExpression, ParsedExpression>(std::move(table_function_ref->match_expression));
 		} else {
-			throw BinderException("duckpgq_match is missing a MATCH expression");
+			throw BinderException("duckpgq_match: MatchExpression not found in function->children[0]. "
+			                      "This extension requires stock DuckDB v1.5.3 or a fork that stores "
+			                      "MatchExpression in FunctionExpression::children[0].");
 		}
 		function->children.clear();
 		auto function_identifier = make_uniq<ConstantExpression>(Value::CreateValue(match_index));
